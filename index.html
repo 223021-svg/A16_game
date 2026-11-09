@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雅・花札ソリティア</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Shippori Mincho', serif;
+            background: radial-gradient(circle at center, #4a1525 0%, #1a050f 100%);
+            color: #fdf6e3;
+            overflow-x: hidden;
+            touch-action: manipulation;
+        }
+
+        .hanafuda-card {
+            width: clamp(50px, 12vw, 80px);
+            height: clamp(80px, 19.2vw, 128px);
+            background-color: #fffaf0;
+            border: clamp(3px, 0.5vw, 6px) solid #111;
+            border-radius: 6px;
+            box-shadow: 2px 4px 8px rgba(0, 0, 0, 0.5);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            user-select: none;
+            overflow: hidden;
+        }
+
+        .hanafuda-card:hover:not(.disabled) {
+            transform: translateY(-10px) scale(1.05);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.6);
+            z-index: 10;
+        }
+
+        .hanafuda-card.disabled {
+            cursor: default;
+            opacity: 0.9;
+        }
+
+        /* 札の枠と背景の装飾 */
+        .card-inner-border {
+            position: absolute;
+            inset: 2px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 2px;
+            pointer-events: none;
+        }
+
+        .card-bg-light { background: linear-gradient(135deg, #fffaf0 0%, #fde68a 100%); }
+        .card-bg-seed { background: linear-gradient(135deg, #fffaf0 0%, #fca5a5 100%); }
+        .card-bg-ribbon { background: linear-gradient(135deg, #fffaf0 0%, #bfdbfe 100%); }
+        .card-bg-kasu { background-color: #fffaf0; }
+
+        .card-icon {
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+            line-height: 1;
+        }
+        
+        .card-sub-icon {
+            font-size: clamp(1rem, 2.5vw, 1.5rem);
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+        }
+
+        .card-month-badge {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            font-size: 0.6rem;
+            color: #666;
+            font-family: sans-serif;
+            background: rgba(255,255,255,0.8);
+            padding: 0 4px;
+            border-radius: 4px;
+        }
+
+        /* 光札のエフェクト */
+        .type-light {
+            box-shadow: 0 0 15px rgba(250, 204, 21, 0.6), inset 0 0 10px rgba(250, 204, 21, 0.4);
+            border-color: #451a03;
+        }
+
+        /* アニメーション用 */
+        .card-enter {
+            animation: slideIn 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(30px) scale(0.8); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        /* スコア表示 */
+        .score-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid #7f1d1d;
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between py-4 px-2 sm:px-8">
+
+    <!-- ヘッダー / スコアボード -->
+    <header class="flex justify-between items-start mb-4">
+        <div class="score-panel p-3 rounded-lg shadow-lg">
+            <h1 class="text-xl sm:text-2xl font-bold text-red-400 mb-2">雅・花札</h1>
+            <div class="text-sm sm:text-base text-gray-300 space-y-1">
+                <p>光 (20点): <span id="score-light" class="text-yellow-400 font-bold">0</span>枚</p>
+                <p>タネ (10点): <span id="score-seed" class="text-red-300 font-bold">0</span>枚</p>
+                <p>短冊 (5点): <span id="score-ribbon" class="text-blue-300 font-bold">0</span>枚</p>
+                <p>カス (1点): <span id="score-kasu" class="text-gray-100 font-bold">0</span>枚</p>
+            </div>
+            <button onclick="startGame()" class="mt-4 w-full bg-red-800 hover:bg-red-700 text-white py-1 px-3 rounded transition shadow-md border border-red-900">
+                最初から
+            </button>
+        </div>
+
+        <div id="status-message" class="flex-1 text-center text-lg sm:text-xl font-bold text-yellow-100 animate-pulse self-center">
+            手札から場に出す札を選んでください
+        </div>
+
+        <!-- 獲得札エリア（縮小表示） -->
+        <div class="score-panel p-3 rounded-lg shadow-lg w-1/3 min-h-[100px] flex flex-wrap content-start gap-1 overflow-y-auto max-h-[200px]" id="captured-area">
+            <!-- 獲得札がここに入ります -->
+        </div>
+    </header>
+
+    <!-- メインの盤面 -->
+    <main class="flex-1 flex flex-col items-center justify-center gap-8 my-4 relative">
+        
+        <!-- 山札と現在引いた札 -->
+        <div class="absolute left-0 top-1/2 -translate-y-1/2 flex gap-4 items-center pl-4">
+            <div class="relative">
+                <div class="hanafuda-card bg-red-900 border-black disabled flex items-center justify-center text-red-950 font-bold text-2xl">
+                    <!-- 背面 -->
+                    <div class="absolute inset-1 border-2 border-black/30 rounded-sm"></div>
+                </div>
+                <div id="deck-count" class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-sm text-gray-400">山: 24</div>
+            </div>
+            
+            <div id="drawn-card-area" class="w-[80px] h-[128px] flex items-center justify-center">
+                <!-- 引いた札がここに表示される -->
+            </div>
+        </div>
+
+        <!-- 場の札 -->
+        <div class="w-full max-w-3xl">
+            <h2 class="text-center text-sm text-gray-400 mb-2 tracking-widest">【 場 札 】</h2>
+            <div id="field-area" class="flex flex-wrap justify-center gap-2 sm:gap-4 min-h-[140px] p-4 bg-black/30 rounded-xl border border-white/10">
+                <!-- 場の札がここに入ります -->
+            </div>
+        </div>
+
+    </main>
+
+    <!-- プレイヤーの手札 -->
+    <footer class="w-full max-w-4xl mx-auto mt-auto">
+        <h2 class="text-center text-sm text-gray-400 mb-2 tracking-widest">【 あなたの手札 】</h2>
+        <div id="hand-area" class="flex justify-center gap-1 sm:gap-3 p-4 bg-gradient-to-t from-black/80 to-transparent rounded-t-xl">
+            <!-- 手札がここに入ります -->
+        </div>
+    </footer>
+
+    <script>
+        // 花札のデータ定義 (12ヶ月 x 4枚 = 48枚)
+        const MONTHS = ['松', '梅', '桜', '藤', '菖蒲', '牡丹', '萩', '芒', '菊', '紅葉', '柳', '桐'];
+        const CARD_DEFS = [
+            // 1月 松
+            { month: 1, type: 'light', icon: '🌲', sub: '🦩', name: '松に鶴' },
+            { month: 1, type: 'ribbon', icon: '🌲', sub: '🎀', name: '松に赤短' },
+            { month: 1, type: 'kasu', icon: '🌲', sub: '', name: '松カス' },
+            { month: 1, type: 'kasu', icon: '🌲', sub: '', name: '松カス' },
+            // 2月 梅
+            { month: 2, type: 'seed', icon: '🌸', sub: '🐦', name: '梅に鶯' },
+            { month: 2, type: 'ribbon', icon: '🌸', sub: '🎀', name: '梅に赤短' },
+            { month: 2, type: 'kasu', icon: '🌸', sub: '', name: '梅カス' },
+            { month: 2, type: 'kasu', icon: '🌸', sub: '', name: '梅カス' },
+            // 3月 桜
+            { month: 3, type: 'light', icon: '💮', sub: '⛺', name: '桜に幕' },
+            { month: 3, type: 'ribbon', icon: '💮', sub: '🎀', name: '桜に赤短' },
+            { month: 3, type: 'kasu', icon: '💮', sub: '', name: '桜カス' },
+            { month: 3, type: 'kasu', icon: '💮', sub: '', name: '桜カス' },
+            // 4月 藤
+            { month: 4, type: 'seed', icon: '🍇', sub: '🕊️', name: '藤に不如帰' },
+            { month: 4, type: 'ribbon', icon: '🍇', sub: '🧧', name: '藤に短冊' },
+            { month: 4, type: 'kasu', icon: '🍇', sub: '', name: '藤カス' },
+            { month: 4, type: 'kasu', icon: '🍇', sub: '', name: '藤カス' },
+            // 5月 菖蒲
+            { month: 5, type: 'seed', icon: '🪻', sub: '🌉', name: '菖蒲に八橋' },
+            { month: 5, type: 'ribbon', icon: '🪻', sub: '🧧', name: '菖蒲に短冊' },
+            { month: 5, type: 'kasu', icon: '🪻', sub: '', name: '菖蒲カス' },
+            { month: 5, type: 'kasu', icon: '🪻', sub: '', name: '菖蒲カス' },
+            // 6月 牡丹
+            { month: 6, type: 'seed', icon: '🌺', sub: '🦋', name: '牡丹に蝶' },
+            { month: 6, type: 'ribbon', icon: '🌺', sub: '🎐', name: '牡丹に青短' },
+            { month: 6, type: 'kasu', icon: '🌺', sub: '', name: '牡丹カス' },
+            { month: 6, type: 'kasu', icon: '🌺', sub: '', name: '牡丹カス' },
+            // 7月 萩
+            { month: 7, type: 'seed', icon: '🌿', sub: '🐗', name: '萩に猪' },
+            { month: 7, type: 'ribbon', icon: '🌿', sub: '🧧', name: '萩に短冊' },
+            { month: 7, type: 'kasu', icon: '🌿', sub: '', name: '萩カス' },
+            { month: 7, type: 'kasu', icon: '🌿', sub: '', name: '萩カス' },
+            // 8月 芒
+            { month: 8, type: 'light', icon: '🌾', sub: '🌕', name: '芒に月' },
+            { month: 8, type: 'seed', icon: '🌾', sub: '🦆', name: '芒に雁' },
+            { month: 8, type: 'kasu', icon: '🌾', sub: '', name: '芒カス' },
+            { month: 8, type: 'kasu', icon: '🌾', sub: '', name: '芒カス' },
+            // 9月 菊
+            { month: 9, type: 'seed', icon: '🌼', sub: '🍶', name: '菊に盃' },
+            { month: 9, type: 'ribbon', icon: '🌼', sub: '🎐', name: '菊に青短' },
+            { month: 9, type: 'kasu', icon: '🌼', sub: '', name: '菊カス' },
+            { month: 9, type: 'kasu', icon: '🌼', sub: '', name: '菊カス' },
+            // 10月 紅葉
+            { month: 10, type: 'seed', icon: '🍁', sub: '🦌', name: '紅葉に鹿' },
+            { month: 10, type: 'ribbon', icon: '🍁', sub: '🎐', name: '紅葉に青短' },
+            { month: 10, type: 'kasu', icon: '🍁', sub: '', name: '紅葉カス' },
+            { month: 10, type: 'kasu', icon: '🍁', sub: '', name: '紅葉カス' },
+            // 11月 柳
+            { month: 11, type: 'light', icon: '🎋', sub: '☔', name: '小野道風' },
+            { month: 11, type: 'seed', icon: '🎋', sub: '🐦‍⬛', name: '柳に燕' },
+            { month: 11, type: 'ribbon', icon: '🎋', sub: '🧧', name: '柳に短冊' },
+            { month: 11, type: 'kasu', icon: '🎋', sub: '⚡', name: '柳カス(鬼札)' },
+            // 12月 桐
+            { month: 12, type: 'light', icon: '🍃', sub: '🦚', name: '桐に鳳凰' },
+            { month: 12, type: 'kasu', icon: '🍃', sub: '✨', name: '桐カス(黄)' },
+            { month: 12, type: 'kasu', icon: '🍃', sub: '', name: '桐カス' },
+            { month: 12, type: 'kasu', icon: '🍃', sub: '', name: '桐カス' },
+        ];
+
+        let deck = [];
+        let field = [];
+        let hand = [];
+        let captured = [];
+        let isAnimating = false;
+
+        const ui = {
+            field: document.getElementById('field-area'),
+            hand: document.getElementById('hand-area'),
+            captured: document.getElementById('captured-area'),
+            drawn: document.getElementById('drawn-card-area'),
+            deckCount: document.getElementById('deck-count'),
+            msg: document.getElementById('status-message'),
+            scores: {
+                light: document.getElementById('score-light'),
+                seed: document.getElementById('score-seed'),
+                ribbon: document.getElementById('score-ribbon'),
+                kasu: document.getElementById('score-kasu')
+            }
+        };
+
+        // シャッフル関数 (Fisher-Yates)
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        // HTMLエレメントとしてのカードを生成
+        function createCardElement(card, onClick = null, small = false) {
+            const el = document.createElement('div');
+            el.className = `hanafuda-card card-bg-${card.type} type-${card.type} card-enter`;
+            
+            if (small) {
+                el.style.width = '30px';
+                el.style.height = '48px';
+                el.style.borderWidth = '2px';
+            }
+
+            el.innerHTML = `
+                <div class="card-inner-border"></div>
+                <div class="card-month-badge">${card.month}月</div>
+                <div class="card-icon" style="${small ? 'font-size: 1rem;' : ''}">${card.icon}</div>
+                ${card.sub ? `<div class="card-sub-icon" style="${small ? 'font-size: 0.7rem; bottom: 1px; right: 1px;' : ''}">${card.sub}</div>` : ''}
+            `;
+            
+            if (onClick && !small) {
+                el.addEventListener('click', () => onClick(card));
+            } else if (!onClick && !small) {
+                el.classList.add('disabled');
+            }
+
+            return el;
+        }
+
+        // 画面の描画更新
+        function render() {
+            ui.field.innerHTML = '';
+            field.forEach(c => ui.field.appendChild(createCardElement(c)));
+
+            ui.hand.innerHTML = '';
+            hand.forEach(c => ui.hand.appendChild(createCardElement(c, handleHandClick)));
+
+            ui.captured.innerHTML = '';
+            captured.forEach(c => ui.captured.appendChild(createCardElement(c, null, true)));
+
+            ui.deckCount.textContent = `山: ${deck.length}`;
+            updateScore();
+        }
+
+        function updateScore() {
+            const counts = { light: 0, seed: 0, ribbon: 0, kasu: 0 };
+            captured.forEach(c => counts[c.type]++);
+            
+            ui.scores.light.textContent = counts.light;
+            ui.scores.seed.textContent = counts.seed;
+            ui.scores.ribbon.textContent = counts.ribbon;
+            ui.scores.kasu.textContent = counts.kasu;
+        }
+
+        function setMsg(text, color = 'text-yellow-100') {
+            ui.msg.textContent = text;
+            ui.msg.className = `flex-1 text-center text-lg sm:text-xl font-bold self-center transition-colors duration-300 ${color}`;
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // プレイヤーが手札をクリックしたときの処理
+        async function handleHandClick(card) {
+            if (isAnimating) return;
+            isAnimating = true;
+
+            // 手札から取り除く
+            hand = hand.filter(c => c !== card);
+            render();
+
+            await processCardPlay(card, "手札");
+
+            // その後、山札から1枚引く
+            if (deck.length > 0) {
+                await sleep(500);
+                const drawnCard = deck.pop();
+                ui.deckCount.textContent = `山: ${deck.length}`;
+                
+                // 引いた札を一時的に表示
+                const drawnEl = createCardElement(drawnCard);
+                ui.drawn.appendChild(drawnEl);
+                setMsg(`山札から【${drawnCard.name}】を引きました`, 'text-blue-300');
+                
+                await sleep(1000);
+                ui.drawn.innerHTML = ''; // クリア
+                
+                await processCardPlay(drawnCard, "山札");
+            }
+
+            // 終了判定
+            if (hand.length === 0) {
+                setMsg("ゲーム終了！お疲れ様でした。", 'text-green-400');
+            } else {
+                setMsg("手札から場に出す札を選んでください");
+            }
+            
+            isAnimating = false;
+        }
+
+        // 札を場に出し、一致判定を行う共通ロジック
+        async function processCardPlay(card, sourceName) {
+            const matches = field.filter(c => c.month === card.month);
+
+            if (matches.length > 0) {
+                // マッチした場合（簡略化のため最初の1枚と合わせる）
+                const matchCard = matches[0];
+                setMsg(`${sourceName}の【${card.name}】が場の【${matchCard.name}】と合いました！`, 'text-pink-300');
+                
+                // 場から消す
+                field = field.filter(c => c !== matchCard);
+                
+                // 獲得
+                captured.push(card);
+                captured.push(matchCard);
+                
+                // エフェクトとしてちょっと待つ
+                render();
+                await sleep(1000);
+            } else {
+                // マッチしない場合、場に残る
+                setMsg(`${sourceName}の【${card.name}】は場に置かれました`, 'text-gray-300');
+                field.push(card);
+                render();
+                await sleep(800);
+            }
+        }
+
+        // ゲームの初期化
+        function startGame() {
+            // カードデータのクローンを作成してシャッフル
+            deck = JSON.parse(JSON.stringify(CARD_DEFS));
+            shuffle(deck);
+
+            captured = [];
+            field = [];
+            hand = [];
+            ui.drawn.innerHTML = '';
+            isAnimating = false;
+
+            // 場に8枚、手札に8枚配る
+            for (let i = 0; i < 8; i++) {
+                field.push(deck.pop());
+                hand.push(deck.pop());
+            }
+
+            // 場に同じ月が4枚あるとドローになってしまうなどのコイコイルールは
+            // 今回のソリティア版では簡略化のため無視します。
+
+            setMsg("ゲーム開始！手札を選んでください");
+            render();
+        }
+
+        // 起動時に開始
+        window.onload = startGame;
+
+    </script>
+</body>
+</html>
